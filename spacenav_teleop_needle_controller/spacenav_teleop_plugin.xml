@@ -1,0 +1,9 @@
+<library path="spacenav_teleop_needle_controller">
+  <class name="needle_controllers/SpacenavTeleopController"
+	 type="needle_controllers::SpacenavTeleopController"
+	 base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Teleop from a Space navigator.
+    </description>
+  </class>
+</library>

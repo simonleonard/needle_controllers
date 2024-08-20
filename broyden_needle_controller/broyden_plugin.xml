@@ -1,0 +1,9 @@
+<library path="broyden_needle_controller">
+  <class name="needle_controllers/BroydenController"
+	 type="needle_controllers::BroydenController"
+	 base_class_type="controller_interface::ControllerInterface">
+    <description>
+      The Broyden velocity controller.
+    </description>
+  </class>
+</library>

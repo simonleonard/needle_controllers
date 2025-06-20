@@ -40,9 +40,10 @@ namespace needle_controllers{
     bool isActive() const { return active_; };
 
     std::vector<std::string> joint_names_;
+    std::vector<std::string> state_interface_names_;
     std::string cmd_interface_type_;
-    std::string end_effector_link_;
-    std::string robot_base_link_;
+    std::string reference_frame_;
+    std::string target_frame_;
     std::string robot_description_;
 
     bool initialized_ = {false};
@@ -50,14 +51,13 @@ namespace needle_controllers{
     bool active_ = {false};
 
     rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr tgt_point_sub_;
-    rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr msr_point_sub_;
     void targetPointCallback(const geometry_msgs::msg::PointStamped::SharedPtr target);
-    void measuredPointCallback(const geometry_msgs::msg::PointStamped::SharedPtr measured);
     
     void writeJointControlCmds();
 
-    std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> joint_cmd_vel_handles_;
-    std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> joint_state_pos_handles_;
+    // This is to measure the positions
+    std::vector<std::reference_wrapper<hardware_interface::LoanedStateInterface>> msr_pos_handles_;
+    std::vector<std::reference_wrapper<hardware_interface::LoanedCommandInterface>> cmd_vel_handles_;
 
     void broydenUpdate( const Eigen::Vector3d& x_j, const Eigen::Vector3d& y_j );
     Eigen::Vector3d simulated_joint_cmd_;

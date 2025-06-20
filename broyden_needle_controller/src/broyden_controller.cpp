@@ -13,10 +13,11 @@ namespace needle_controllers{
     std::cout << "BroydenController::on_init" << std::endl;
     if(!initialized_){
       auto_declare<std::string>("robot_description", "");
-      auto_declare<std::string>("robot_base_link", "");
-      auto_declare<std::string>("end_effector_link", "");
-      auto_declare<std::string>("interface_name", "");
+      auto_declare<std::string>("reference_frame", "");
+      auto_declare<std::string>("target_frame", "");
+      auto_declare<std::string>("command_interface", "");
       auto_declare<std::vector<std::string>>("joints", std::vector<std::string>());
+      auto_declare<std::vector<std::string>>("state_interfaces", std::vector<std::string>());
       initialized_ = true;
     }
     return controller_interface::CallbackReturn::SUCCESS;
@@ -34,15 +35,15 @@ namespace needle_controllers{
       return controller_interface::CallbackReturn::ERROR;
     }
       
-    robot_base_link_ = get_node()->get_parameter("robot_base_link").as_string();
-    if(robot_base_link_.empty()){
-      RCLCPP_ERROR(get_node()->get_logger(), "robot_base_link is empty");
+    reference_frame_ = get_node()->get_parameter("reference_frame").as_string();
+    if(reference_frame_.empty()){
+      RCLCPP_ERROR(get_node()->get_logger(), "reference_frame is empty");
       return controller_interface::CallbackReturn::ERROR;
     }
     
-    end_effector_link_ = get_node()->get_parameter("end_effector_link").as_string();
-    if(end_effector_link_.empty()){
-      RCLCPP_ERROR(get_node()->get_logger(), "end_effector_link is empty");
+    target_frame_ = get_node()->get_parameter("target_frame").as_string();
+    if(target_frame_.empty()){
+      RCLCPP_ERROR(get_node()->get_logger(), "target_frame is empty");
       return controller_interface::CallbackReturn::ERROR;
     }
 
@@ -52,54 +53,77 @@ namespace needle_controllers{
       return controller_interface::CallbackReturn::ERROR;
     }
 
-    cmd_interface_type_ = get_node()->get_parameter("interface_name").as_string();
+    state_interface_names_ = get_node()->get_parameter("state_interfaces").as_string_array();
+    if(joint_names_.empty()){
+      RCLCPP_ERROR(get_node()->get_logger(), "state interfaces array is empty");
+      return controller_interface::CallbackReturn::ERROR;
+    }
+
+    cmd_interface_type_ = get_node()->get_parameter("command_interface").as_string();
     if(cmd_interface_type_.empty()){
       RCLCPP_ERROR(get_node()->get_logger(), "No command_interfaces specified");
       return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
     }
     /*
     std::cout << "robot description: " << robot_description_ << std::endl;
-    std::cout << "robot base link: " << robot_base_link_ << std::endl;
-    std::cout << "end effector link: " << end_effector_link_ << std::endl;
+    std::cout << "reference frame: " << reference_frame_ << std::endl;
+    std::cout << "target frame: " << target_frame_ << std::endl;
     std::cout << "command interface: " << cmd_interface_type_ << std::endl;
-    */
-    for(int i=0; i<joint_names_.size(); i++ ){
-      std::cout << joint_names_[i] << std::endl;
+
+    for(auto& name : joint_names_ ){
+      std::cout << name << std::endl;
     }
     
+    for(auto& name : state_interface_names_ ){
+      std::cout << name << std::endl;
+    }
+    */
     tgt_point_sub_ =
       get_node()->create_subscription<geometry_msgs::msg::PointStamped>(get_node()->get_name() +
-									std::string("/cmd_tip"), 3,
+									std::string("/target"), 3,
 									std::bind(&BroydenController::targetPointCallback,
 										  this, std::placeholders::_1));
-    msr_point_sub_ =
-      get_node()->create_subscription<geometry_msgs::msg::PointStamped>(get_node()->get_name() +
-									std::string("/msr_tip"), 3,
-									std::bind(&BroydenController::measuredPointCallback,
-										  this, std::placeholders::_1));
-
     configured_ = true;
     return controller_interface::CallbackReturn::SUCCESS;
   }
   
   controller_interface::CallbackReturn BroydenController::on_activate(const rclcpp_lifecycle::State& previous_state){
+
+    std::cout << "BroydenController::on_activate" << std::endl;
+    
     if(active_)
       return controller_interface::CallbackReturn::SUCCESS;
 
-    if(!controller_interface::get_ordered_interfaces(command_interfaces_, joint_names_, cmd_interface_type_, joint_cmd_vel_handles_)){
+    for(int i=0; i<command_interfaces_.size(); i++ )
+      std::cout << command_interfaces_[i].get_full_name() << std::endl;
+    
+    if(!controller_interface::get_ordered_interfaces(command_interfaces_,
+						     joint_names_,
+						     cmd_interface_type_,
+						     cmd_vel_handles_)){
       RCLCPP_ERROR(get_node()->get_logger(),
 		   "Expected %zu '%s' command interfaces, got %zu.",
-		   joint_names_.size(), cmd_interface_type_.c_str(),
-		   joint_cmd_vel_handles_.size());
+		   joint_names_.size(),
+		   cmd_interface_type_.c_str(),
+		   cmd_vel_handles_.size());
       return CallbackReturn::ERROR;
     }
 
-    if(!controller_interface::get_ordered_interfaces(state_interfaces_, joint_names_,
-						     hardware_interface::HW_IF_POSITION,
-						     joint_state_pos_handles_)){
+    for(auto name : state_interface_names_ )
+      std::cout << name << std::endl;
+    
+    for(int i=0; i<state_interfaces_.size(); i++ )
+      std::cout << state_interfaces_[i].get_full_name() << std::endl;
+    
+    
+    if(!controller_interface::get_ordered_interfaces(state_interfaces_,
+						     state_interface_names_,
+						     "",//controller_interface::interface_configuration_type::ALL,
+						     msr_pos_handles_)){
       RCLCPP_ERROR(get_node()->get_logger(), "Expected %zu '%s' state interfaces, got %zu.",
-		   joint_names_.size(), hardware_interface::HW_IF_POSITION,
-		   joint_state_pos_handles_.size());
+		   state_interface_names_.size(),
+		   hardware_interface::HW_IF_POSITION,
+		   msr_pos_handles_.size());
       return CallbackReturn::ERROR;
     }
 
@@ -117,8 +141,8 @@ namespace needle_controllers{
   controller_interface::CallbackReturn BroydenController::on_deactivate(const rclcpp_lifecycle::State& previous_state){
     std::cout << "BroydenController::on_deactivate" << std::endl;
     if(active_){
-      joint_cmd_vel_handles_.clear();
-      joint_state_pos_handles_.clear();
+      cmd_vel_handles_.clear();
+      msr_pos_handles_.clear();
       this->release_interfaces();
     }
     active_ = false;
@@ -126,6 +150,7 @@ namespace needle_controllers{
   }
   
   controller_interface::InterfaceConfiguration BroydenController::command_interface_configuration() const{
+    // configure the joints commands interface
     controller_interface::InterfaceConfiguration conf;
     conf.type = controller_interface::interface_configuration_type::INDIVIDUAL;
     conf.names.reserve(joint_names_.size() * cmd_interface_type_.size());
@@ -136,12 +161,19 @@ namespace needle_controllers{
   }
 
   controller_interface::InterfaceConfiguration BroydenController::state_interface_configuration() const{
+    // configure the position state interface
     controller_interface::InterfaceConfiguration conf;
     conf.type = controller_interface::interface_configuration_type::INDIVIDUAL;
+    /*
     conf.names.reserve(joint_names_.size());  // Only position
     for(const auto & joint_name : joint_names_){
       conf.names.push_back(joint_name + "/position");
     }
+    */
+    conf.names.push_back(target_frame_ + "/pose.position.x");
+    conf.names.push_back(target_frame_ + "/pose.position.y");
+    conf.names.push_back(target_frame_ + "/pose.position.z");
+
     return conf;
   }
   
@@ -156,15 +188,16 @@ namespace needle_controllers{
       return;
     }
 
-    if(target->header.frame_id != robot_base_link_){
+    if(target->header.frame_id != reference_frame_){
       auto & clock = *get_node()->get_clock();
       RCLCPP_WARN_THROTTLE(get_node()->get_logger(), clock, 3000,
 			   "Got target point in wrong reference frame. Expected: %s but got %s",
-			   robot_base_link_.c_str(), target->header.frame_id.c_str());
+			   reference_frame_.c_str(), target->header.frame_id.c_str());
       return;
     }
   }
   
+  /*
   void BroydenController::measuredPointCallback(const geometry_msgs::msg::PointStamped::SharedPtr measured){
     if(!this->isActive()){
       return;
@@ -185,7 +218,8 @@ namespace needle_controllers{
     }
     
   }
-
+  */
+  
   controller_interface::return_type BroydenController::update(const rclcpp::Time&, const rclcpp::Duration& period){
     //static double t=0.0;
 
@@ -208,8 +242,8 @@ namespace needle_controllers{
   void BroydenController::writeJointControlCmds(){
 
     for(std::size_t i=0; i<joint_names_.size(); ++i){
-      joint_cmd_vel_handles_[i].get().set_value( simulated_joint_cmd_(i) );
-      //std::cout << joint_cmd_vel_handles_[i].get().get_value() << " ";
+      cmd_vel_handles_[i].get().set_value( simulated_joint_cmd_(i) );
+      //std::cout << cmd_vel_handles_[i].get().get_value() << " ";
     }
     //std::cout << std::endl << std::endl;
   }
@@ -228,9 +262,9 @@ namespace needle_controllers{
     // JacobiSVD: thin U and V are only available when your matrix has a dynamic number of columns.
     Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeThinU | Eigen::ComputeThinV);
     double cond = svd.singularValues()(0)/svd.singularValues()(svd.singularValues().size()-1);
-    if( cond < 1e6 ){
 
-      Eigen::Vector3d rhs(0, 0.5, 0);
+    if( cond < 1e6 ){
+      Eigen::Vector3d rhs(0.0, 0.0, 0.0);
       simulated_joint_cmd_ = svd.solve(rhs);
       //std::cout << svd.matrixU() << std::endl << svd.singularValues() << std::endl << svd.matrixV() << std::endl;
       //std::cout << simulated_joint_cmd_ << std::endl << std::endl;

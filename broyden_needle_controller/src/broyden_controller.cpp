@@ -13,11 +13,16 @@ namespace needle_controllers{
     std::cout << "BroydenController::on_init" << std::endl;
     if(!initialized_){
       auto_declare<std::string>("robot_description", "");
-      auto_declare<std::string>("reference_frame", "");
-      auto_declare<std::string>("target_frame", "");
+      
       auto_declare<std::string>("command_interface", "");
       auto_declare<std::vector<std::string>>("joints", std::vector<std::string>());
-      auto_declare<std::vector<std::string>>("state_interfaces", std::vector<std::string>());
+      
+      auto_declare<std::string>("reference_frame", "");
+      auto_declare<std::vector<std::string>>("reference_interfaces", std::vector<std::string>());
+      
+      auto_declare<std::string>("target_frame", "");
+      auto_declare<std::vector<std::string>>("target_interfaces", std::vector<std::string>());
+      
       initialized_ = true;
     }
     return controller_interface::CallbackReturn::SUCCESS;
@@ -35,16 +40,10 @@ namespace needle_controllers{
       return controller_interface::CallbackReturn::ERROR;
     }
       
-    reference_frame_ = get_node()->get_parameter("reference_frame").as_string();
-    if(reference_frame_.empty()){
-      RCLCPP_ERROR(get_node()->get_logger(), "reference_frame is empty");
-      return controller_interface::CallbackReturn::ERROR;
-    }
-    
-    target_frame_ = get_node()->get_parameter("target_frame").as_string();
-    if(target_frame_.empty()){
-      RCLCPP_ERROR(get_node()->get_logger(), "target_frame is empty");
-      return controller_interface::CallbackReturn::ERROR;
+    cmd_interface_type_ = get_node()->get_parameter("command_interface").as_string();
+    if(cmd_interface_type_.empty()){
+      RCLCPP_ERROR(get_node()->get_logger(), "No command_interfaces specified");
+      return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
     }
 
     joint_names_ = get_node()->get_parameter("joints").as_string_array();
@@ -53,17 +52,30 @@ namespace needle_controllers{
       return controller_interface::CallbackReturn::ERROR;
     }
 
-    state_interface_names_ = get_node()->get_parameter("state_interfaces").as_string_array();
-    if(joint_names_.empty()){
-      RCLCPP_ERROR(get_node()->get_logger(), "state interfaces array is empty");
+    target_frame_ = get_node()->get_parameter("target_frame").as_string();
+    if(target_frame_.empty()){
+      RCLCPP_ERROR(get_node()->get_logger(), "target_frame is empty");
       return controller_interface::CallbackReturn::ERROR;
     }
 
-    cmd_interface_type_ = get_node()->get_parameter("command_interface").as_string();
-    if(cmd_interface_type_.empty()){
-      RCLCPP_ERROR(get_node()->get_logger(), "No command_interfaces specified");
-      return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::ERROR;
+    target_interface_names_ = get_node()->get_parameter("target_interfaces").as_string_array();
+    if(target_interface_names_.empty()){
+      RCLCPP_ERROR(get_node()->get_logger(), "target interfaces array is empty");
+      return controller_interface::CallbackReturn::ERROR;
     }
+
+    reference_frame_ = get_node()->get_parameter("reference_frame").as_string();
+    if(reference_frame_.empty()){
+      RCLCPP_ERROR(get_node()->get_logger(), "reference_frame is empty");
+      return controller_interface::CallbackReturn::ERROR;
+    }
+    
+    reference_interface_names_ = get_node()->get_parameter("reference_interfaces").as_string_array();
+    if(reference_interface_names_.empty()){
+      RCLCPP_ERROR(get_node()->get_logger(), "reference interfaces array is empty");
+      return controller_interface::CallbackReturn::ERROR;
+    }
+
     /*
     std::cout << "robot description: " << robot_description_ << std::endl;
     std::cout << "reference frame: " << reference_frame_ << std::endl;
@@ -78,6 +90,7 @@ namespace needle_controllers{
       std::cout << name << std::endl;
     }
     */
+    
     tgt_point_sub_ =
       get_node()->create_subscription<geometry_msgs::msg::PointStamped>(get_node()->get_name() +
 									std::string("/target"), 3,
@@ -95,7 +108,7 @@ namespace needle_controllers{
       return controller_interface::CallbackReturn::SUCCESS;
 
     for(int i=0; i<command_interfaces_.size(); i++ )
-      std::cout << command_interfaces_[i].get_full_name() << std::endl;
+      std::cout << "ci: " << command_interfaces_[i].get_full_name() << std::endl;
     
     if(!controller_interface::get_ordered_interfaces(command_interfaces_,
 						     joint_names_,
@@ -109,24 +122,31 @@ namespace needle_controllers{
       return CallbackReturn::ERROR;
     }
 
-    for(auto name : state_interface_names_ )
+    for(auto name : reference_interface_names_ )
+      std::cout << name << std::endl;
+    
+    for(auto name : target_interface_names_ )
       std::cout << name << std::endl;
     
     for(int i=0; i<state_interfaces_.size(); i++ )
-      std::cout << state_interfaces_[i].get_full_name() << std::endl;
-    
+      std::cout << "si: " <<  state_interfaces_[i].get_full_name() << std::endl;
+
+    std::vector<std::string> state_interface_names(reference_interface_names_);
+    state_interface_names.insert(state_interface_names.end(),
+				 target_interface_names_.begin(),
+				 target_interface_names_.end() );
     
     if(!controller_interface::get_ordered_interfaces(state_interfaces_,
-						     state_interface_names_,
+						     state_interface_names,
 						     "",//controller_interface::interface_configuration_type::ALL,
 						     msr_pos_handles_)){
       RCLCPP_ERROR(get_node()->get_logger(), "Expected %zu '%s' state interfaces, got %zu.",
-		   state_interface_names_.size(),
+		   state_interface_names.size(),
 		   hardware_interface::HW_IF_POSITION,
 		   msr_pos_handles_.size());
       return CallbackReturn::ERROR;
     }
-
+    
     simulated_joint_cmd_ << 0.0, 0.0, 0.0;
     x_i << 0.0, 0.0, 0.0;
     y_i << 0.0, 0.0, 0.0;
@@ -170,9 +190,18 @@ namespace needle_controllers{
       conf.names.push_back(joint_name + "/position");
     }
     */
+    // This is redundant with the activate stuff.
     conf.names.push_back(target_frame_ + "/pose.position.x");
     conf.names.push_back(target_frame_ + "/pose.position.y");
     conf.names.push_back(target_frame_ + "/pose.position.z");
+
+    conf.names.push_back(reference_frame_ + "/pose.position.x");
+    conf.names.push_back(reference_frame_ + "/pose.position.y");
+    conf.names.push_back(reference_frame_ + "/pose.position.z");
+    conf.names.push_back(reference_frame_ + "/pose.orientation.x");
+    conf.names.push_back(reference_frame_ + "/pose.orientation.y");
+    conf.names.push_back(reference_frame_ + "/pose.orientation.z");
+    conf.names.push_back(reference_frame_ + "/pose.orientation.w");
 
     return conf;
   }
@@ -219,7 +248,7 @@ namespace needle_controllers{
     
   }
   */
-  
+
   controller_interface::return_type BroydenController::update(const rclcpp::Time&, const rclcpp::Duration& period){
     //static double t=0.0;
 
@@ -248,8 +277,100 @@ namespace needle_controllers{
     //std::cout << std::endl << std::endl;
   }
 
+  tf2::Vector3 BroydenController::GetStatePosition( const std::string& frame_name ){
+    double x, y, z;
+    bool foundx=false, foundy=false, foundz=false;
+    
+    for( auto interface : msr_pos_handles_ ){
+      //std::cout << interface.get().get_name() << std::endl;
+      //std::cout << interface.get().get_interface_name() << std::endl;
+      //std::cout << interface.get().get_full_name() << std::endl;
+      //std::cout << interface.get().get_prefix_name() << std::endl;
+      //std::cout << interface.get().get_value() << std::endl;
+
+      if( interface.get().get_prefix_name().find( frame_name )      != std::string::npos && // find the target frame
+	  interface.get().get_interface_name().find( "position.x" ) != std::string::npos){  // find the x pos
+	x = interface.get().get_value();
+	//std::cout << interface.get().get_full_name() << std::endl; 
+	foundx=true;
+      }
+      if( interface.get().get_prefix_name().find( frame_name )      != std::string::npos && // find the target frame
+	  interface.get().get_interface_name().find( "position.y" ) != std::string::npos){  // find the y pos
+	//std::cout << interface.get().get_full_name() << std::endl; 
+	y = interface.get().get_value();
+	foundy=true;
+      }
+      if( interface.get().get_prefix_name().find( frame_name )      != std::string::npos && // find the target frame
+	  interface.get().get_interface_name().find( "position.z" ) != std::string::npos){  // find the z pos
+	//std::cout << interface.get().get_full_name() << std::endl; 
+	z = interface.get().get_value();
+	foundz=true;
+      }
+
+    }
+    //std::cout << x << " " << y << " " << z << std::endl;
+    tf2::Vector3 xyz(x, y, z);
+    
+    return xyz;
+
+  }
+  
+  tf2::Quaternion BroydenController::GetStateQuaternion( const std::string& frame_name ){
+    double qw, qx, qy, qz;
+    bool foundqw=false, foundqx=false, foundqy=false, foundqz=false;
+    
+    for( auto interface : msr_pos_handles_ ){
+      //std::cout << interface.get().get_name() << std::endl;
+      //std::cout << interface.get().get_interface_name() << std::endl;
+      //std::cout << interface.get().get_full_name() << std::endl;
+      //std::cout << interface.get().get_prefix_name() << std::endl;
+      //std::cout << interface.get().get_value() << std::endl;
+
+      if( interface.get().get_prefix_name().find( frame_name )      != std::string::npos &&   // find the target frame
+	  interface.get().get_interface_name().find( "orientation.w" ) != std::string::npos){ // find the x pos
+	qw = interface.get().get_value();
+	//std::cout << interface.get().get_full_name() << std::endl; 
+	foundqw=true;
+      }
+      if( interface.get().get_prefix_name().find( frame_name )      != std::string::npos &&   // find the target frame
+	  interface.get().get_interface_name().find( "orientation.x" ) != std::string::npos){ // find the x pos
+	qx = interface.get().get_value();
+	//std::cout << interface.get().get_full_name() << std::endl; 
+	foundqx=true;
+      }
+      if( interface.get().get_prefix_name().find( frame_name )      != std::string::npos &&   // find the target frame
+	  interface.get().get_interface_name().find( "orientation.y" ) != std::string::npos){ // find the y pos
+	//std::cout << interface.get().get_full_name() << std::endl; 
+	qy = interface.get().get_value();
+	foundqy=true;
+      } 
+      if( interface.get().get_prefix_name().find( frame_name )      != std::string::npos &&   // find the target frame
+	  interface.get().get_interface_name().find( "orientation.z" ) != std::string::npos){ // find the z pos
+	//std::cout << interface.get().get_full_name() << std::endl; 
+	qz = interface.get().get_value();
+	foundqz=true;
+      }
+
+    }
+    //std::cout << qx << " " << qy << " " << qz << " " << qw << std::endl;
+    tf2::Quaternion q(qx, qy, qz, qw);
+    
+    return q;
+
+  }
+  
   void BroydenController::broydenUpdate( const Eigen::Vector3d& x_j, const Eigen::Vector3d& y_j ){
 
+    // Get needle position:
+    tf2::Vector3 needlexyz = GetStatePosition( target_frame_ );
+    tf2::Vector3 refxyz = GetStatePosition( reference_frame_ );
+    tf2::Quaternion refq = GetStateQuaternion( reference_frame_ );    
+    tf2::Transform ref( refq, refxyz );
+    
+    // The needle is in the Aurora's frame. Need to transform to zframe
+    needlexyz = ref.inverse() * needlexyz;
+    //std::cout << needlexyz.getX() << " " << needlexyz.getY() << " " << needlexyz.getZ() << std::endl;
+    
     // y_t = f(x_t)
     // dy = y_t - y_t-1 
     Eigen::Vector3d dx = x_j - x_i;

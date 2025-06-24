@@ -7,6 +7,10 @@
 
 #include "geometry_msgs/msg/point_stamped.hpp"
 
+#include <tf2/LinearMath/Vector3.hpp>
+#include <tf2/LinearMath/Quaternion.hpp>
+#include <tf2/LinearMath/Transform.hpp>
+
 #include <Eigen/Dense>
 
 namespace needle_controllers{
@@ -40,10 +44,11 @@ namespace needle_controllers{
     bool isActive() const { return active_; };
 
     std::vector<std::string> joint_names_;
-    std::vector<std::string> state_interface_names_;
     std::string cmd_interface_type_;
     std::string reference_frame_;
+    std::vector<std::string> reference_interface_names_;
     std::string target_frame_;
+    std::vector<std::string> target_interface_names_;
     std::string robot_description_;
 
     bool initialized_ = {false};
@@ -64,6 +69,9 @@ namespace needle_controllers{
     Eigen::Vector3d x_i, y_i;
     Eigen::Matrix3d J;
     
+    tf2::Vector3 GetStatePosition( const std::string& frame_name );
+    tf2::Quaternion GetStateQuaternion( const std::string& frame_name );
+
   };
   
 }

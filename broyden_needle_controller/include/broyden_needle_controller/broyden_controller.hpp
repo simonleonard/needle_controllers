@@ -62,7 +62,13 @@ namespace needle_controllers{
     bool executing_ = {false};
 
     rclcpp::Subscription<moveit_msgs::msg::CartesianTrajectory>::SharedPtr trajectory_sub_;
+    rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr needle_sub_;
+    geometry_msgs::msg::Point msr_needle_;
+    bool use_feedback_state_interface_ = {true};
+    bool valid_feedback_ = {false};
+    
     void trajectoryCallback(const moveit_msgs::msg::CartesianTrajectory::SharedPtr trajectory);
+    void needleCallback(const geometry_msgs::msg::Point::SharedPtr trajectory);
     
     void writeJointControlCmds();
 

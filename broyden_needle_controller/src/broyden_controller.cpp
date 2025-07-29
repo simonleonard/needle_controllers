@@ -24,6 +24,9 @@ namespace needle_controllers{
       auto_declare<std::string>("tracked_frame", "");
       auto_declare<std::vector<std::string>>("tracked_interfaces", std::vector<std::string>());
       
+      auto_declare<bool>("use_feedback_state_interface", true);
+      auto_declare<std::vector<std::string>>("tracked_interfaces", std::vector<std::string>());
+      
       initialized_ = true;
     }
     return controller_interface::CallbackReturn::SUCCESS;
@@ -77,6 +80,12 @@ namespace needle_controllers{
       RCLCPP_ERROR(get_node()->get_logger(), "reference interfaces array is empty");
       return controller_interface::CallbackReturn::ERROR;
     }
+
+    use_feedback_state_interface_ = get_node()->get_parameter("use_feedback_state_interface").as_bool();
+    //if(reference_interface_names_.empty()){
+    //RCLCPP_ERROR(get_node()->get_logger(), "reference interfaces array is empty");
+    //return controller_interface::CallbackReturn::ERROR;
+    //}
 
     /*
     std::cout << "robot description: " << robot_description_ << std::endl;
@@ -137,16 +146,35 @@ namespace needle_controllers{
       RCLCPP_INFO_STREAM(get_node()->get_logger(), "State interface: " <<  state_interfaces_[i].get_name());
 
     // gather all the state interfaces:
-    // reference
-    std::vector<std::string> state_interface_names(reference_interface_names_);
-    // tracked 
-    state_interface_names.insert(state_interface_names.end(),
-				 tracked_interface_names_.begin(),
-				 tracked_interface_names_.end() );
     // joint positions
+    std::vector<std::string> state_interface_names;
     for( auto joint : joint_names_ )
       { state_interface_names.push_back( joint + "/position" ); }
-				 
+
+    if( use_feedback_state_interface_ ){
+      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Using state interface for feedback.");
+      // reference
+      state_interface_names.insert(state_interface_names.end(),
+				   reference_interface_names_.begin(),
+				   reference_interface_names_.end() );
+      // tracked 
+      state_interface_names.insert(state_interface_names.end(),
+				   tracked_interface_names_.begin(),
+				   tracked_interface_names_.end() );
+      use_feedback_state_interface_ = true;
+    }
+    else{
+      RCLCPP_INFO_STREAM(get_node()->get_logger(), "Using topic for feedback.");
+      use_feedback_state_interface_ = false;
+      needle_sub_ =
+	get_node()->create_subscription<geometry_msgs::msg::Point>
+	(get_node()->get_name() +
+	 std::string("/needle_msr"), 3,
+	 std::bind(&BroydenController::needleCallback,
+		   this, std::placeholders::_1));
+    
+    }
+    
     if(!controller_interface::get_ordered_interfaces(state_interfaces_,
 						     state_interface_names,
 						     "",//controller_interface::interface_configuration_type::ALL,
@@ -220,6 +248,12 @@ namespace needle_controllers{
     return conf;
   }
 
+  void BroydenController::needleCallback(const geometry_msgs::msg::Point::SharedPtr needle){
+
+    msr_needle_ = *needle;
+    valid_feedback_ = true;
+    
+  }
   //
   void BroydenController::trajectoryCallback(const moveit_msgs::msg::CartesianTrajectory::SharedPtr trajectory){
     RCLCPP_INFO_STREAM(get_node()->get_logger(), "Received trajectory.");
@@ -422,17 +456,23 @@ namespace needle_controllers{
 
   Eigen::Vector3d BroydenController::getTargetXYZ(){
 
-    // Get needle position:
-    tf2::Vector3 needlexyz = GetStatePosition( tracked_frame_ );
-    tf2::Vector3 refxyz = GetStatePosition( reference_frame_ );
-    tf2::Quaternion refq = GetStateQuaternion( reference_frame_ );    
-    tf2::Transform ref( refq, refxyz );
-    
-    // The needle is in the Aurora's frame. Need to transform to zframe
-    needlexyz = ref.inverse() * needlexyz;
-    //std::cout << needlexyz.getX() << " " << needlexyz.getY() << " " << needlexyz.getZ() << std::endl;
-
-    return Eigen::Vector3d ( needlexyz.getX(), needlexyz.getY(), needlexyz.getZ() );
+    if( use_feedback_state_interface_ ){
+      // Get needle position:
+      tf2::Vector3 needlexyz = GetStatePosition( tracked_frame_ );
+      tf2::Vector3 refxyz = GetStatePosition( reference_frame_ );
+      tf2::Quaternion refq = GetStateQuaternion( reference_frame_ );    
+      tf2::Transform ref( refq, refxyz );
+      
+      // The needle is in the Aurora's frame. Need to transform to zframe
+      needlexyz = ref.inverse() * needlexyz;
+      //std::cout << needlexyz.getX() << " " << needlexyz.getY() << " " << needlexyz.getZ() << std::endl;
+      return Eigen::Vector3d ( needlexyz.getX(), needlexyz.getY(), needlexyz.getZ() );
+    }
+    else{
+      if( valid_feedback_ ){
+	return Eigen::Vector3d( msr_needle_.x,  msr_needle_.y,  msr_needle_.z );
+      }
+    }
     
   }
   

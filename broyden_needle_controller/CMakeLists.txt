@@ -11,7 +11,7 @@ find_package(control_msgs REQUIRED)
 find_package(controller_interface REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3)
-find_package(geometry_msgs REQUIRED)
+find_package(moveit_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(tf2 REQUIRED)
@@ -23,7 +23,7 @@ target_include_directories(broyden_needle_controller PUBLIC
   $<INSTALL_INTERFACE:include/needle_controllers>
 )
 
-ament_target_dependencies(broyden_needle_controller PUBLIC Eigen3 rclcpp pluginlib control_msgs controller_interface geometry_msgs rclcpp tf2)
+ament_target_dependencies(broyden_needle_controller PUBLIC Eigen3 rclcpp pluginlib control_msgs controller_interface moveit_msgs rclcpp tf2)
 
 pluginlib_export_plugin_description_file(controller_interface broyden_plugin.xml)
 

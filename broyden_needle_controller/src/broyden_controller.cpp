@@ -108,6 +108,9 @@ namespace needle_controllers{
        std::string("/needle_trajectory"), 3,
        std::bind(&BroydenController::trajectoryCallback,
 		 this, std::placeholders::_1));
+
+    command_pub_ = get_node()->create_publisher<geometry_msgs::msg::Vector3>( get_node()->get_name()+std::string("/command"), 10 );
+    target_pub_ = get_node()->create_publisher<geometry_msgs::msg::Point>( get_node()->get_name()+std::string("/target"), 10 );
     
     configured_ = true;
     
@@ -168,8 +171,8 @@ namespace needle_controllers{
       use_feedback_state_interface_ = false;
       needle_sub_ =
 	get_node()->create_subscription<geometry_msgs::msg::Point>
-	(get_node()->get_name() +
-	 std::string("/needle_msr"), 3,
+	(//get_node()->get_name() +
+	 std::string("/tracked_tip"), 3,
 	 std::bind(&BroydenController::needleCallback,
 		   this, std::placeholders::_1));
     
@@ -190,7 +193,10 @@ namespace needle_controllers{
 
     // The needle is in the Aurora's frame. Need to transform to zframe
     x_i = getRobotXYZ();
-    y_i = getTargetXYZ();
+    if( use_feedback_state_interface_ ){
+      y_i = getTargetXYZ();
+    }
+    
     //J = Eigen::Matrix3d::Identity();
     J << -1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0;
     
@@ -250,10 +256,18 @@ namespace needle_controllers{
 
   void BroydenController::needleCallback(const geometry_msgs::msg::Point::SharedPtr needle){
 
-    msr_needle_ = *needle;
-    valid_feedback_ = true;
-    
+    // order matters.
+    if( !yi_initialized_ ){
+      std::cout << "INIT YI" << std::endl;
+      msr_needle_ = *needle;
+      y_i = getTargetXYZ();
+      yi_initialized_= true;
+    }
+    else{
+      msr_needle_ = *needle;
+    }
   }
+  
   //
   void BroydenController::trajectoryCallback(const moveit_msgs::msg::CartesianTrajectory::SharedPtr trajectory){
     RCLCPP_INFO_STREAM(get_node()->get_logger(), "Received trajectory.");
@@ -331,8 +345,6 @@ namespace needle_controllers{
       //Eigen::Vector3d y_j = getTargetXYZ();
       //std::cout << "Target: " << y_j << std::endl;
 	
-
-	
 	/*
 	RCLCPP_WARN_STREAM(get_node()->get_logger(),
 			   "X: " << current_point->point.pose.position.x <<
@@ -340,8 +352,13 @@ namespace needle_controllers{
 			   "Z: " << current_point->point.pose.position.z);
 	*/
 	//std::cout << J << std::endl;
+      std::cout << current_point - points.begin() << " of " << points.size() << std::endl;
+      geometry_msgs::msg::Point target;
+      target.x = current_point->point.pose.position.x;
+      target.y = current_point->point.pose.position.y;
+      target.z = current_point->point.pose.position.z;
+      target_pub_->publish( target );
       current_point++;
-	
       if( current_point == points.end() ){
 	executing_ = false;
 	simulated_joint_cmd_ << 0.0, 0.0, 0.0;
@@ -469,9 +486,8 @@ namespace needle_controllers{
       return Eigen::Vector3d ( needlexyz.getX(), needlexyz.getY(), needlexyz.getZ() );
     }
     else{
-      if( valid_feedback_ ){
-	return Eigen::Vector3d( msr_needle_.x,  msr_needle_.y,  msr_needle_.z );
-      }
+      RCLCPP_INFO_STREAM(get_node()->get_logger(), "needle: " << msr_needle_.x << " " << msr_needle_.y << " "<<  msr_needle_.z );
+      return Eigen::Vector3d( msr_needle_.x,  msr_needle_.y,  msr_needle_.z );
     }
     
   }
@@ -531,9 +547,15 @@ namespace needle_controllers{
     // JacobiSVD: thin U and V are only available when your matrix has a dynamic number of columns.
     Eigen::JacobiSVD<Eigen::MatrixXd> svd(J, Eigen::ComputeThinU | Eigen::ComputeThinV);
     double cond = svd.singularValues()(0)/svd.singularValues()(svd.singularValues().size()-1);
-    std::cout << "J: " << std::endl << J << std::endl;
+    //std::cout << "J: " << std::endl << J << std::endl;
+    std::cout << "error: " << ys.transpose() << std::endl;
     if( cond < 1e6 ){
       simulated_joint_cmd_ = svd.solve(ys);
+      geometry_msgs::msg::Vector3 cmd;
+      cmd.x = simulated_joint_cmd_[0];
+      cmd.y = simulated_joint_cmd_[1];
+      cmd.z = simulated_joint_cmd_[2];
+      command_pub_->publish(cmd);
       //std::cout << svd.matrixU() << std::endl << svd.singularValues() << std::endl << svd.matrixV() << std::endl;
     }
     else{

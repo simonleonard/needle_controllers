@@ -61,11 +61,13 @@ namespace needle_controllers{
     bool active_ = {false};
     bool executing_ = {false};
 
+    rclcpp::Publisher<geometry_msgs::msg::Vector3>::SharedPtr command_pub_;
+    rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr target_pub_;
     rclcpp::Subscription<moveit_msgs::msg::CartesianTrajectory>::SharedPtr trajectory_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr needle_sub_;
     geometry_msgs::msg::Point msr_needle_;
     bool use_feedback_state_interface_ = {true};
-    bool valid_feedback_ = {false};
+    bool yi_initialized_ = {false};
     
     void trajectoryCallback(const moveit_msgs::msg::CartesianTrajectory::SharedPtr trajectory);
     void needleCallback(const geometry_msgs::msg::Point::SharedPtr trajectory);
